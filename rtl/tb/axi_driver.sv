@@ -1,106 +1,71 @@
-// ============================================================================
-// axi_if.sv
-// AXI4-Lite interface for verification
-// Used by driver, monitor, assertions
-// ============================================================================
+class axi_driver;
 
-interface axi_if #(
-    parameter ADDR_WIDTH = 32,
-    parameter DATA_WIDTH = 32
-)(
-    input logic ACLK,
-    input logic ARESETN
-);
+    virtual axi_if.DRIVER vif;
 
-    // ---------------- Write Address Channel ----------------
-    logic                  AWVALID;
-    logic                  AWREADY;
-    logic [ADDR_WIDTH-1:0] AWADDR;
+    function new(virtual axi_if.DRIVER vif);
+        this.vif = vif;
+    endfunction
 
-    // ---------------- Write Data Channel -------------------
-    logic                  WVALID;
-    logic                  WREADY;
-    logic [DATA_WIDTH-1:0] WDATA;
+    task reset();
+        vif.drv_cb.AWVALID <= 0;
+        vif.drv_cb.WVALID  <= 0;
+        vif.drv_cb.BREADY  <= 0;
+        vif.drv_cb.ARVALID <= 0;
+        vif.drv_cb.RREADY  <= 0;
+        wait(vif.ARESETN);
+    endtask
 
-    // ---------------- Write Response Channel ---------------
-    logic                  BVALID;
-    logic                  BREADY;
-    logic [1:0]            BRESP;
+    task drive(axi_transaction txn);
+        if(txn.cmd == axi_transaction::AXI_WRITE)
+            drive_write(txn);
+        else
+            drive_read(txn);
+    endtask
 
-    // ---------------- Read Address Channel -----------------
-    logic                  ARVALID;
-    logic                  ARREADY;
-    logic [ADDR_WIDTH-1:0] ARADDR;
+    task drive_write(axi_transaction txn);
 
-    // ---------------- Read Data Channel --------------------
-    logic                  RVALID;
-    logic                  RREADY;
-    logic [DATA_WIDTH-1:0] RDATA;
-    logic [1:0]            RRESP;
+        vif.drv_cb.AWADDR  <= txn.addr;
+        vif.drv_cb.WDATA   <= txn.wdata;
+        vif.drv_cb.AWVALID <= 1;
+        vif.drv_cb.WVALID  <= 1;
 
-    // =========================================================================
-    // Clocking block for DRIVER
-    // =========================================================================
-    clocking drv_cb @(posedge ACLK);
-        default input #1step output #1step;
+        fork
+            begin
+                wait(vif.drv_cb.AWREADY);
+                @(vif.drv_cb);
+                vif.drv_cb.AWVALID <= 0;
+            end
+            begin
+                wait(vif.drv_cb.WREADY);
+                @(vif.drv_cb);
+                vif.drv_cb.WVALID <= 0;
+            end
+        join
 
-        // Write address
-        output AWVALID, AWADDR;
-        input  AWREADY;
+        vif.drv_cb.BREADY <= 1;
+        wait(vif.drv_cb.BVALID);
+        txn.resp = vif.drv_cb.BRESP;
+        @(vif.drv_cb);
+        vif.drv_cb.BREADY <= 0;
 
-        // Write data
-        output WVALID, WDATA;
-        input  WREADY;
+    endtask
 
-        // Write response
-        input  BVALID, BRESP;
-        output BREADY;
+    task drive_read(axi_transaction txn);
 
-        // Read address
-        output ARVALID, ARADDR;
-        input  ARREADY;
+        vif.drv_cb.ARADDR  <= txn.addr;
+        vif.drv_cb.ARVALID <= 1;
 
-        // Read data
-        input  RVALID, RDATA, RRESP;
-        output RREADY;
-    endclocking
+        wait(vif.drv_cb.ARREADY);
+        @(vif.drv_cb);
+        vif.drv_cb.ARVALID <= 0;
 
-    // =========================================================================
-    // Clocking block for MONITOR
-    // =========================================================================
-    clocking mon_cb @(posedge ACLK);
-        default input #1step;
+        vif.drv_cb.RREADY <= 1;
+        wait(vif.drv_cb.RVALID);
+        txn.rdata = vif.drv_cb.RDATA;
+        txn.resp  = vif.drv_cb.RRESP;
+        @(vif.drv_cb);
+        vif.drv_cb.RREADY <= 0;
 
-        // Observe everything
-        input AWVALID, AWREADY, AWADDR;
-        input WVALID,  WREADY,  WDATA;
-        input BVALID,  BREADY,  BRESP;
-        input ARVALID, ARREADY, ARADDR;
-        input RVALID,  RREADY,  RDATA, RRESP;
-    endclocking
+    endtask
 
-    // =========================================================================
-    // Modports
-    // =========================================================================
-    modport DRIVER  (clocking drv_cb, input ARESETN);
-    modport MONITOR (clocking mon_cb, input ARESETN);
-    modport DUT (
-        input  ACLK, ARESETN,
-
-        input  AWVALID, AWADDR,
-        output AWREADY,
-
-        input  WVALID,  WDATA,
-        output WREADY,
-
-        output BVALID,  BRESP,
-        input  BREADY,
-
-        input  ARVALID, ARADDR,
-        output ARREADY,
-
-        output RVALID,  RDATA, RRESP,
-        input  RREADY
-    );
-
-endinterface
+endclass
