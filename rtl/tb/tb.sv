@@ -1,162 +1,78 @@
-// ============================================================================
-// tb.sv
-// AXI-Lite Verification Environment Top
-// Drives DUT + Runs Driver, Monitor, Scoreboard
-// ============================================================================
-
 `timescale 1ns/1ps
 
 module tb;
 
-    // ------------------------------------------------------------------------
-    // Clock + Reset
-    // ------------------------------------------------------------------------
-    logic ACLK;
-    logic ARESETN;
+logic ACLK;
+logic ARESETN;
 
-    initial begin
-        ACLK = 0;
-        forever #5 ACLK = ~ACLK;   // 100 MHz
-    end
+initial begin
+    ACLK = 0;
+    forever #5 ACLK = ~ACLK;
+end
 
-    initial begin
-        ARESETN = 0;
-        repeat(10) @(posedge ACLK);
-        ARESETN = 1;
-    end
+initial begin
+    ARESETN = 0;
+    repeat(10) @(posedge ACLK);
+    ARESETN = 1;
+end
 
-    // ------------------------------------------------------------------------
-    // AXI Interface
-    // ------------------------------------------------------------------------
-    axi_if axi_if_inst(
-        .ACLK    (ACLK),
-        .ARESETN (ARESETN)
-    );
+axi_if axi(.*);
 
-    // ------------------------------------------------------------------------
-    // DUT Instance
-    // ------------------------------------------------------------------------
-    top_soc dut (
-        .ACLK     (ACLK),
-        .ARESETN  (ARESETN),
+top_soc dut(
+    .ACLK(ACLK), .ARESETN(ARESETN),
+    .AWVALID(axi.AWVALID), .AWREADY(axi.AWREADY), .AWADDR(axi.AWADDR),
+    .WVALID(axi.WVALID), .WREADY(axi.WREADY), .WDATA(axi.WDATA),
+    .BVALID(axi.BVALID), .BREADY(axi.BREADY), .BRESP(axi.BRESP),
+    .ARVALID(axi.ARVALID), .ARREADY(axi.ARREADY), .ARADDR(axi.ARADDR),
+    .RVALID(axi.RVALID), .RREADY(axi.RREADY), .RDATA(axi.RDATA), .RRESP(axi.RRESP)
+);
 
-        .AWVALID  (axi_if_inst.AWVALID),
-        .AWREADY  (axi_if_inst.AWREADY),
-        .AWADDR   (axi_if_inst.AWADDR),
+mailbox #(axi_transaction) mon_mb = new();
 
-        .WVALID   (axi_if_inst.WVALID),
-        .WREADY   (axi_if_inst.WREADY),
-        .WDATA    (axi_if_inst.WDATA),
+axi_driver drv;
+axi_monitor mon;
+axi_scoreboard scb;
 
-        .BVALID   (axi_if_inst.BVALID),
-        .BREADY   (axi_if_inst.BREADY),
-        .BRESP    (axi_if_inst.BRESP),
+initial begin
+    drv = new(axi.DRIVER);
+    mon = new(axi.MONITOR, mon_mb);
+    scb = new(mon_mb);
 
-        .ARVALID  (axi_if_inst.ARVALID),
-        .ARREADY  (axi_if_inst.ARREADY),
-        .ARADDR   (axi_if_inst.ARADDR),
+    drv.reset();
+    fork
+        mon.run();
+        scb.run();
+    join_none
+end
 
-        .RVALID   (axi_if_inst.RVALID),
-        .RREADY   (axi_if_inst.RREADY),
-        .RDATA    (axi_if_inst.RDATA),
-        .RRESP    (axi_if_inst.RRESP)
-    );
+task send(input axi_transaction t);
+    drv.drive(t);
+endtask
 
-    // ------------------------------------------------------------------------
-    // Mailbox + ENV Components
-    // ------------------------------------------------------------------------
-    mailbox #(axi_transaction) mon_mb = new();
+initial begin
+    axi_transaction t;
 
-    axi_driver     drv;
-    axi_monitor    mon;
-    axi_scoreboard scb;
+    wait(ARESETN);
+    $display("TEST START");
 
-    // ------------------------------------------------------------------------
-    // Environment Bring-Up
-    // ------------------------------------------------------------------------
-    initial begin
-        drv = new(axi_if_inst.DRIVER);
-        mon = new(axi_if_inst.MONITOR, mon_mb);
-        scb = new(mon_mb);
+    t = new(); t.cmd = axi_transaction::AXI_WRITE; t.addr=32'h8; t.wdata=32'h1234_5678; send(t);
+    t = new(); t.cmd = axi_transaction::AXI_WRITE; t.addr=32'h0; t.wdata=1; send(t);
+    t = new(); t.cmd = axi_transaction::AXI_READ;  t.addr=32'h4; send(t);
+    t = new(); t.cmd = axi_transaction::AXI_READ;  t.addr=32'hC; send(t);
 
-        // Start monitor + scoreboard
-        fork
-            mon.run();
-            scb.run();
-        join_none;
-    end
-
-    // ------------------------------------------------------------------------
-    // TEST SEQUENCE
-    // ------------------------------------------------------------------------
-    task drive_txn(input axi_transaction txn);
-        drv.drive(txn);
-        txn.display("DRV SENT: ");
-    endtask
-
-    initial begin
-        axi_transaction t;
-
-        wait(ARESETN == 1);
-        $display("RESET DONE, STARTING TEST");
-
-        // ------------------------------
-        // WRITE: DATA_IN = 0x1234_5678
-        // ------------------------------
+    repeat(10) begin
         t = new();
-        t.cmd   = axi_transaction::AXI_WRITE;
-        t.addr  = 32'h0000_0008; // DATA_IN
-        t.wdata = 32'h1234_5678;
-        drive_txn(t);
-
-        // ------------------------------
-        // WRITE: CTRL enable
-        // ------------------------------
-        t = new();
-        t.cmd   = axi_transaction::AXI_WRITE;
-        t.addr  = 32'h0000_0000; // CTRL
-        t.wdata = 32'h1;
-        drive_txn(t);
-
-        // ------------------------------
-        // READ STATUS
-        // ------------------------------
-        t = new();
-        t.cmd  = axi_transaction::AXI_READ;
-        t.addr = 32'h0000_0004;
-        drive_txn(t);
-
-        // ------------------------------
-        // READ DATA_OUT (expect DATA_IN + 0x10)
-        // ------------------------------
-        t = new();
-        t.cmd  = axi_transaction::AXI_READ;
-        t.addr = 32'h0000_000C;
-        drive_txn(t);
-
-        // ------------------------------
-        // Optional: Random Stress
-        // ------------------------------
-        repeat(5) begin
-            t = new();
-            assert(t.randomize());
-            drive_txn(t);
-        end
-
-        // ------------------------------
-        // Finish
-        // ------------------------------
-        #100;
-        $display("TEST COMPLETE");
-        $finish;
+        assert(t.randomize());
+        send(t);
     end
 
-    // ------------------------------------------------------------------------
-    // Wave Dump (Optional — Questa supports VCD too)
-    // ------------------------------------------------------------------------
-    initial begin
-        $dumpfile("axi_soc.vcd");
-        $dumpvars(0, tb);
-    end
+    #100;
+    $finish;
+end
+
+initial begin
+    $dumpfile("axi.vcd");
+    $dumpvars(0,tb);
+end
 
 endmodule
