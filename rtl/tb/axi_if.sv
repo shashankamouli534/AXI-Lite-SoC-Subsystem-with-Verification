@@ -2,8 +2,8 @@ interface axi_if #(
     parameter ADDR_WIDTH = 32,
     parameter DATA_WIDTH = 32
 )(
-    input logic ACLK,
-    input logic ARESETN
+    input  logic ACLK,
+    input  logic ARESETN
 );
 
     logic                  AWVALID;
@@ -27,17 +27,22 @@ interface axi_if #(
     logic [DATA_WIDTH-1:0] RDATA;
     logic [1:0]            RRESP;
 
-    // DRIVER
+    // ================= DRIVER CLOCKING =================
     clocking drv_cb @(posedge ACLK);
         default input #1step output #1step;
-        output AWVALID, AWADDR; input AWREADY;
-        output WVALID,  WDATA;  input WREADY;
-        input  BVALID, BRESP;   output BREADY;
-        output ARVALID, ARADDR; input ARREADY;
-        input  RVALID, RDATA, RRESP; output RREADY;
+        output AWVALID, AWADDR;
+        output WVALID,  WDATA;
+        output BREADY;
+        output ARVALID, ARADDR;
+        output RREADY;
+
+        input  AWREADY, WREADY;
+        input  BVALID, BRESP;
+        input  ARREADY;
+        input  RVALID, RDATA, RRESP;
     endclocking
 
-    // MONITOR
+    // ================= MONITOR CLOCKING =================
     clocking mon_cb @(posedge ACLK);
         default input #1step;
         input AWVALID, AWREADY, AWADDR;
@@ -56,5 +61,4 @@ interface axi_if #(
         output AWREADY, WREADY, BVALID, BRESP,
         output ARREADY, RVALID, RDATA, RRESP
     );
-
 endinterface
