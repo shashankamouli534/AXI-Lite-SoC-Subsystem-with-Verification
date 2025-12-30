@@ -1,25 +1,19 @@
 class axi_agent;
+        virtual axi_if vif;
 
-    virtual axi_if vif;
+        axi_driver  drv;
+        axi_monitor mon;
 
-    axi_driver  drv;
-    axi_monitor mon;
+        function new(virtual axi_if vif);
+            this.vif = vif;
+            drv = new(vif);
+            mon = new(vif);
+        endfunction
 
-    mailbox #(axi_transaction) mon_mb;
-
-    function new(virtual axi_if vif);
-        this.vif = vif;
-        mon_mb = new();
-
-        drv = new(vif.DRIVER);
-        mon = new(vif.MONITOR, mon_mb);
-    endfunction
-
-    task start();
-        drv.reset();
-        fork
-            mon.run();
-        join_none
-    endtask
-
-endclass
+        task start();
+            drv.reset();
+            fork
+                mon.run();
+            join_none
+        endtask
+    endclass
